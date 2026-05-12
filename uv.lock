@@ -230,7 +230,14 @@ wheels = [
 [[package]]
 name = "nldate"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
+
+[package.optional-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -240,6 +247,12 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [
+    { name = "mypy", marker = "extra == 'dev'" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "ruff", marker = "extra == 'dev'" },
+]
+provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [
