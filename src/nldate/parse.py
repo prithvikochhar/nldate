@@ -246,4 +246,15 @@ def parse(s: str, today: date | None = None) -> date:
     if m:
         return date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
 
+    # "<n> days/weeks/months/years before/after <YYYY-MM-DD>"
+    m = re.fullmatch(
+        r"([\w ]+?) (day|days|week|weeks|month|months|year|years) (before|after) "
+        r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",
+        s,
+    )
+    if m:
+        n = _parse_number(m.group(1))
+        ref = date(int(m.group(4)), int(m.group(5)), int(m.group(6)))
+        return _apply_delta(ref, n, m.group(2), m.group(3))
+
     raise ValueError(f"Cannot parse date: {s!r}")
