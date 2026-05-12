@@ -163,6 +163,23 @@ def parse(s: str, today: date | None = None) -> date:
     s = s.strip().lower()
     s = re.sub(r"\s+", " ", s)
 
+    # "the day after/before tomorrow/yesterday/today"
+    m = re.fullmatch(r"the day (after|before) (today|tomorrow|yesterday|now)", s)
+    if m:
+        direction = m.group(1)
+        ref = _ref_date(m.group(2), today)
+        return _apply_delta(ref, 1, "days", direction)
+
+    # "the week/month/year after/before tomorrow/yesterday/today"
+    m = re.fullmatch(
+        r"the (week|month|year) (after|before) (today|tomorrow|yesterday|now)", s
+    )
+    if m:
+        unit = m.group(1) + "s"
+        direction = m.group(2)
+        ref = _ref_date(m.group(3), today)
+        return _apply_delta(ref, 1, unit, direction)
+
     # "today" / "now"
     if s in ("today", "now"):
         return today
