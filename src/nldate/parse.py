@@ -257,4 +257,34 @@ def parse(s: str, today: date | None = None) -> date:
         ref = date(int(m.group(4)), int(m.group(5)), int(m.group(6)))
         return _apply_delta(ref, n, m.group(2), m.group(3))
 
+    # "<n> years, <m> months before/after <month> <day>, <year>" or ISO date
+    m = re.fullmatch(
+        r"([\w ]+?) year(?:s)?,? (and )?([ \w]+?) month(?:s)? (before|after) "
+        r"(\w+\.?) (\d+)(?:st|nd|rd|th)?,? (\d{4})",
+        s,
+    )
+    if m:
+        month_val = _parse_month(m.group(5))
+        if month_val is not None:
+            years = _parse_number(m.group(1))
+            months = _parse_number(m.group(3).strip())
+            direction = m.group(4)
+            ref = date(int(m.group(7)), month_val, int(m.group(6)))
+            total_months = years * 12 + months
+            return _apply_delta(ref, total_months, "months", direction)
+
+    # "<n> years, <m> months before/after <YYYY-MM-DD>"
+    m = re.fullmatch(
+        r"([\w ]+?) year(?:s)?,? (and )?([ \w]+?) month(?:s)? (before|after) "
+        r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",
+        s,
+    )
+    if m:
+        years = _parse_number(m.group(1))
+        months = _parse_number(m.group(3).strip())
+        direction = m.group(4)
+        ref = date(int(m.group(5)), int(m.group(6)), int(m.group(7)))
+        total_months = years * 12 + months
+        return _apply_delta(ref, total_months, "months", direction)
+
     raise ValueError(f"Cannot parse date: {s!r}")
