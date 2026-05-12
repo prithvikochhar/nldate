@@ -1,7 +1,6 @@
 from datetime import date, timedelta
 import re
 
-
 WEEKDAYS = {
     "monday": 0,
     "tuesday": 1,
@@ -99,24 +98,21 @@ def _add_months(d: date, n: int) -> date:
     month = d.month + n
     year = d.year + (month - 1) // 12
     month = (month - 1) % 12 + 1
-    last_day = (
-        (date(year, month % 12 + 1, 1) - timedelta(days=1)).day if month != 12 else 31
-    )
+    if month == 12:
+        last_day = 31
+    else:
+        last_day = (date(year, month % 12 + 1, 1) - timedelta(days=1)).day
     day = min(d.day, last_day)
     return d.replace(year=year, month=month, day=day)
 
 
-def _normalize_month(s: str) -> str:
-    """Remove trailing period from abbreviated month names."""
-    return s.rstrip(".")
-
-
 def _parse_month(s: str) -> int | None:
-    key = _normalize_month(s.lower())
+    key = s.rstrip(".").lower()
     return MONTHS.get(key)
 
 
 def _ref_date(word: str, today: date) -> date:
+    word = word.strip()
     if word == "tomorrow":
         return today + timedelta(days=1)
     if word == "yesterday":
@@ -125,7 +121,7 @@ def _ref_date(word: str, today: date) -> date:
 
 
 def _apply_delta(ref: date, n: int, unit: str, direction: str) -> date:
-    sign = 1 if direction == "after" else -1
+    sign = 1 if direction in ("after", "from") else -1
     if unit in ("day", "days"):
         return ref + timedelta(days=sign * n)
     if unit in ("week", "weeks"):
@@ -137,6 +133,29 @@ def _apply_delta(ref: date, n: int, unit: str, direction: str) -> date:
     raise ValueError(f"Unknown unit: {unit}")
 
 
+def _parse_exact_date(s: str) -> date | None:
+    # "december 1st, 2025" or "dec. 1, 2025"
+    m = re.fullmatch(r"(\w+\.?) (\d+)(?:st|nd|rd|th)?,? (\d{4})", s)
+    if m:
+        month_val = _parse_month(m.group(1))
+        if month_val is not None:
+            return date(int(m.group(3)), month_val, int(m.group(2)))
+    # "2025-12-01" or "2025/12/01"
+    m = re.fullmatch(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
+    if m:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    # "12/01/2025"
+    m = re.fullmatch(r"(\d{1,2})[-/](\d{1,2})[-/](\d{4})", s)
+    if m:
+        return date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+    return None
+
+
+_REL_WORDS = r"(today|tomorrow|yesterday|now)"
+_UNIT = r"(day|days|week|weeks|month|months|year|years)"
+_NUM = r"(\d+|[a-z][\w ]*?)"
+
+
 def parse(s: str, today: date | None = None) -> date:
     if today is None:
         today = date.today()
@@ -144,8 +163,8 @@ def parse(s: str, today: date | None = None) -> date:
     s = s.strip().lower()
     s = re.sub(r"\s+", " ", s)
 
-    # "today"
-    if s == "today":
+    # "today" / "now"
+    if s in ("today", "now"):
         return today
 
     # "tomorrow"
@@ -171,120 +190,67 @@ def parse(s: str, today: date | None = None) -> date:
     if m and m.group(1) in WEEKDAYS:
         return _next_weekday(today, WEEKDAYS[m.group(1)])
 
-    # "in <n> days/weeks/months/years"
-    m = re.fullmatch(r"in ([\w ]+?) (day|days|week|weeks|month|months|year|years)", s)
-    if m:
-        n = _parse_number(m.group(1))
-        return _apply_delta(today, n, m.group(2), "after")
-
-    # "<n> days/weeks/months/years ago"
-    m = re.fullmatch(r"([\w ]+?) (day|days|week|weeks|month|months|year|years) ago", s)
-    if m:
-        n = _parse_number(m.group(1))
-        return _apply_delta(today, n, m.group(2), "before")
-
-    # "<n> days/weeks/months/years from now/today/tomorrow/yesterday"
+    # "<n> years and/,? <m> months after/before <relative word>"
+    # Must come BEFORE single-unit patterns to avoid greedy conflicts
     m = re.fullmatch(
-        r"([\w ]+?) (day|days|week|weeks|month|months|year|years) from (now|today|tomorrow|yesterday)",
-        s,
-    )
-    if m:
-        n = _parse_number(m.group(1))
-        ref = _ref_date(m.group(3), today)
-        return _apply_delta(ref, n, m.group(2), "after")
-
-    # "<n> days/weeks/months/years before now/today/tomorrow/yesterday"
-    m = re.fullmatch(
-        r"([\w ]+?) (day|days|week|weeks|month|months|year|years) before (now|today|tomorrow|yesterday)",
-        s,
-    )
-    if m:
-        n = _parse_number(m.group(1))
-        ref = _ref_date(m.group(3), today)
-        return _apply_delta(ref, n, m.group(2), "before")
-
-    # "<n> days/weeks/months/years before/after <month> <day>, <year>"
-    # supports "Dec. 1, 2025" and "December 1st, 2025"
-    m = re.fullmatch(
-        r"([\w ]+?) (day|days|week|weeks|month|months|year|years) (before|after) "
-        r"(\w+\.?) (\d+)(?:st|nd|rd|th)?,? (\d{4})",
-        s,
-    )
-    if m:
-        month_val = _parse_month(m.group(4))
-        if month_val is not None:
-            n = _parse_number(m.group(1))
-            ref = date(int(m.group(6)), month_val, int(m.group(5)))
-            return _apply_delta(ref, n, m.group(2), m.group(3))
-
-    # "<n> years and <m> months after/before <reference>"
-    m = re.fullmatch(
-        r"([\w ]+?) year(?:s)? and ([\w ]+?) month(?:s)? (after|before) (today|tomorrow|yesterday|now)",
+        r"(\d+|\w+) year(?:s)?(?:,)? (?:and )?(\d+|\w+) month(?:s)? (after|before|from) "
+        + _REL_WORDS,
         s,
     )
     if m:
         years = _parse_number(m.group(1))
         months = _parse_number(m.group(2))
+        direction = m.group(3)
         ref = _ref_date(m.group(4), today)
-        total_months = years * 12 + months
-        return _apply_delta(ref, total_months, "months", m.group(3))
+        return _apply_delta(ref, years * 12 + months, "months", direction)
 
-    # exact date: "december 1st, 2025" or "dec. 1, 2025"
-    m = re.fullmatch(r"(\w+\.?) (\d+)(?:st|nd|rd|th)?,? (\d{4})", s)
-    if m:
-        month_val = _parse_month(m.group(1))
-        if month_val is not None:
-            return date(int(m.group(3)), month_val, int(m.group(2)))
-
-    # exact date: "2025-12-01" or "2025/12/01"
-    m = re.fullmatch(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
-    if m:
-        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-
-    # exact date: "12/01/2025" or "12-01-2025"
-    m = re.fullmatch(r"(\d{1,2})[-/](\d{1,2})[-/](\d{4})", s)
-    if m:
-        return date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
-
-    # "<n> days/weeks/months/years before/after <YYYY-MM-DD>"
+    # "<n> years and/,? <m> months after/before <exact date>"
     m = re.fullmatch(
-        r"([\w ]+?) (day|days|week|weeks|month|months|year|years) (before|after) "
-        r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",
+        r"(\d+|\w+) year(?:s)?(?:,)? (?:and )?(\d+|\w+) month(?:s)? (after|before|from) (.+)",
         s,
     )
+    if m:
+        _ref1 = _parse_exact_date(m.group(4))
+        if _ref1 is not None:
+            years = _parse_number(m.group(1))
+            months = _parse_number(m.group(2))
+            direction = m.group(3)
+            return _apply_delta(_ref1, years * 12 + months, "months", direction)
+
+    # "in <n> days/weeks/months/years"
+    m = re.fullmatch(r"in " + _NUM + r" " + _UNIT, s)
     if m:
         n = _parse_number(m.group(1))
-        ref = date(int(m.group(4)), int(m.group(5)), int(m.group(6)))
-        return _apply_delta(ref, n, m.group(2), m.group(3))
+        return _apply_delta(today, n, m.group(2), "after")
 
-    # "<n> years, <m> months before/after <month> <day>, <year>" or ISO date
-    m = re.fullmatch(
-        r"([\w ]+?) year(?:s)?,? (and )?([ \w]+?) month(?:s)? (before|after) "
-        r"(\w+\.?) (\d+)(?:st|nd|rd|th)?,? (\d{4})",
-        s,
-    )
+    # "<n> days/weeks/months/years ago"
+    m = re.fullmatch(_NUM + r" " + _UNIT + r" ago", s)
     if m:
-        month_val = _parse_month(m.group(5))
-        if month_val is not None:
-            years = _parse_number(m.group(1))
-            months = _parse_number(m.group(3).strip())
-            direction = m.group(4)
-            ref = date(int(m.group(7)), month_val, int(m.group(6)))
-            total_months = years * 12 + months
-            return _apply_delta(ref, total_months, "months", direction)
+        n = _parse_number(m.group(1))
+        return _apply_delta(today, n, m.group(2), "before")
 
-    # "<n> years, <m> months before/after <YYYY-MM-DD>"
-    m = re.fullmatch(
-        r"([\w ]+?) year(?:s)?,? (and )?([ \w]+?) month(?:s)? (before|after) "
-        r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",
-        s,
-    )
+    # "<n> unit from/after/before <relative word>"
+    m = re.fullmatch(_NUM + r" " + _UNIT + r" (from|after|before) " + _REL_WORDS, s)
     if m:
-        years = _parse_number(m.group(1))
-        months = _parse_number(m.group(3).strip())
-        direction = m.group(4)
-        ref = date(int(m.group(5)), int(m.group(6)), int(m.group(7)))
-        total_months = years * 12 + months
-        return _apply_delta(ref, total_months, "months", direction)
+        n = _parse_number(m.group(1))
+        unit = m.group(2)
+        direction = m.group(3)
+        ref = _ref_date(m.group(4), today)
+        return _apply_delta(ref, n, unit, direction)
+
+    # "<n> unit from/after/before <exact date>"
+    m = re.fullmatch(_NUM + r" " + _UNIT + r" (from|after|before) (.+)", s)
+    if m:
+        _ref2 = _parse_exact_date(m.group(4))
+        if _ref2 is not None:
+            n = _parse_number(m.group(1))
+            unit = m.group(2)
+            direction = m.group(3)
+            return _apply_delta(_ref2, n, unit, direction)
+
+    # exact date formats
+    exact = _parse_exact_date(s)
+    if exact is not None:
+        return exact
 
     raise ValueError(f"Cannot parse date: {s!r}")
